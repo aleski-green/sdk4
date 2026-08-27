@@ -17,6 +17,7 @@ BUILTIN_DEFAULTS = {
     "k": 3,
     "chars_per_token": 4,
     "idle_timeout": 0,
+    "turn_timeout": 600,
     "compressor_prompt": "Compress this conversation slice to at most {CHUNK_TOKENS} tokens. Output only the summary.",
     "turn_prompt": "",
     "post_leap_prompt": "You are continuing an eternal session. Your memory follows.",
@@ -32,12 +33,13 @@ _GLOBAL_MAP = {
     "k": "k",
     "chars-per-token": "chars_per_token",
     "idle-timeout": "idle_timeout",
+    "turn-timeout": "turn_timeout",
     "compressor-prompt": "compressor_prompt",
     "default-turn-prompt": "turn_prompt",
     "default-post-leap-prompt": "post_leap_prompt",
 }
 
-_INT_KEYS = {"trigger_tokens", "compressed_budget", "cut_tokens", "k", "chars_per_token", "idle_timeout"}
+_INT_KEYS = {"trigger_tokens", "compressed_budget", "cut_tokens", "k", "chars_per_token", "idle_timeout", "turn_timeout"}
 
 
 def utcnow() -> str:
@@ -54,7 +56,7 @@ def _text(el, tag):
 def load_global_config(path=None) -> dict:
     """Load tool-root config.xml over builtin defaults."""
     cfg = dict(BUILTIN_DEFAULTS)
-    path = path or os.path.join(TOOL_ROOT, "config.xml")
+    path = path or os.environ.get("ELLM_CONFIG") or os.path.join(TOOL_ROOT, "config.xml")
     if os.path.exists(path):
         root = ET.parse(path).getroot()
         for tag, key in _GLOBAL_MAP.items():
@@ -95,6 +97,8 @@ _MANIFEST_MAP = {
     "turn-prompt": "turn_prompt",
     "post-leap-prompt": "post_leap_prompt",
     "compressor-prompt": "compressor_prompt",
+    "idle-timeout": "idle_timeout",
+    "turn-timeout": "turn_timeout",
 }
 
 
@@ -157,7 +161,10 @@ CREATE TABLE IF NOT EXISTS state (
 
 def connect(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, id)")
+    conn.commit()
     return conn
 
 
