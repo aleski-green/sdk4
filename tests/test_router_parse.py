@@ -48,6 +48,12 @@ class CodexParseTests(unittest.TestCase):
         ])
         self.assertEqual(state["session_id"], "tid-1")
         self.assertEqual(state["usage_tokens"], 1050)
+        self.assertEqual(state["usage"], {
+            "input_tokens": 1000,
+            "cached_input_tokens": 900,
+            "output_tokens": 40,
+            "reasoning_output_tokens": 10,
+        })
         self.assertEqual(chunks, ["hi"])
 
     def test_delta_then_completed_does_not_repeat(self):

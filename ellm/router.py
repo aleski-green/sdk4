@@ -40,6 +40,9 @@ class TurnResult:
     # True when usage_tokens is the current context window after this turn
     # (Codex input+output). False when it is a per-turn delta to accumulate.
     usage_is_window: bool = False
+    # Raw backend usage is retained for auditing; usage_tokens is the normalized
+    # value used by the provider-window safety guard.
+    usage: Optional[dict] = None
 
 
 class BackendError(RuntimeError):
@@ -245,9 +248,12 @@ class CodexAdapter:
                        "response.output_text.delta"):
             apply_agent_message_event(state, ev, on_chunk)
         elif etype == "turn.completed":
-            tokens = window_tokens_from_usage(ev.get("usage") or {})
+            usage = ev.get("usage") or {}
+            tokens = window_tokens_from_usage(usage)
             if tokens:
                 state["usage_tokens"] = tokens
+            if isinstance(usage, dict):
+                state["usage"] = usage
         elif etype == "turn.failed":
             err = ev.get("error") or ev.get("message") or "turn.failed"
             if isinstance(err, dict):
@@ -302,6 +308,7 @@ class CodexAdapter:
                 session_id=state.get("session_id") or session_id,
                 usage_tokens=state.get("usage_tokens"),
                 usage_is_window=True,
+                usage=state.get("usage"),
             )
         finally:
             try:
@@ -355,6 +362,8 @@ class KimiAdapter:
             state["usage_tokens"] = tokens
             # kimi usage is treated as a window when input_tokens is present
             state["usage_is_window"] = "input_tokens" in usage or "inputTokens" in usage
+        if isinstance(usage, dict):
+            state["usage"] = usage
 
     def _exec(self, work_dir, prompt, session_id=None, on_chunk=None, timeout=None):
         cmd = [self.binary]
@@ -374,6 +383,7 @@ class KimiAdapter:
             session_id=state.get("session_id") or session_id or self.CONTINUE,
             usage_tokens=state.get("usage_tokens"),
             usage_is_window=bool(state.get("usage_is_window")),
+            usage=state.get("usage"),
         )
 
     def send(self, work_dir, session_id, prompt, on_chunk=None, timeout=None) -> TurnResult:
@@ -399,6 +409,7 @@ class MockAdapter:
     last_compress_cwd = None
     next_usage_tokens = None
     next_usage_is_window = False
+    next_usage = None
 
     def send(self, work_dir, session_id, prompt, on_chunk=None, timeout=None) -> TurnResult:
         import uuid
@@ -410,8 +421,10 @@ class MockAdapter:
         window = MockAdapter.next_usage_is_window
         MockAdapter.next_usage_tokens = None
         MockAdapter.next_usage_is_window = False
+        raw_usage = MockAdapter.next_usage
+        MockAdapter.next_usage = None
         return TurnResult(text=text, session_id=sid, usage_tokens=usage,
-                          usage_is_window=window)
+                          usage_is_window=window, usage=raw_usage)
 
     def compress(self, work_dir, full_prompt, timeout=None) -> str:
         MockAdapter.last_compress_cwd = work_dir

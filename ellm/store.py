@@ -12,6 +12,8 @@ BUILTIN_DEFAULTS = {
     "backend": "codex",
     "compressor_backend": "",
     "trigger_tokens": 180_000,
+    # Optional local-chat threshold. Zero keeps provider-window-only leaps.
+    "chat_trigger_tokens": 0,
     "compressed_budget": 30_000,
     "cut_tokens": 30_000,
     "k": 3,
@@ -28,6 +30,7 @@ _GLOBAL_MAP = {
     "backend": "backend",
     "compressor-backend": "compressor_backend",
     "trigger-tokens": "trigger_tokens",
+    "chat-trigger-tokens": "chat_trigger_tokens",
     "compressed-budget": "compressed_budget",
     "cut-tokens": "cut_tokens",
     "k": "k",
@@ -39,7 +42,7 @@ _GLOBAL_MAP = {
     "default-post-leap-prompt": "post_leap_prompt",
 }
 
-_INT_KEYS = {"trigger_tokens", "compressed_budget", "cut_tokens", "k", "chars_per_token", "idle_timeout", "turn_timeout"}
+_INT_KEYS = {"trigger_tokens", "chat_trigger_tokens", "compressed_budget", "cut_tokens", "k", "chars_per_token", "idle_timeout", "turn_timeout"}
 
 
 def utcnow() -> str:
@@ -81,6 +84,7 @@ MANIFEST_TEMPLATE = """<ellm-instance>
   <!-- optional overrides (defaults come from global config.xml): -->
   <!-- <backend>kimi</backend> -->
   <!-- <trigger-tokens>150000</trigger-tokens> -->
+  <!-- <chat-trigger-tokens>120000</chat-trigger-tokens> -->
   <turn-prompt><![CDATA[{turn_prompt}]]></turn-prompt>
   <post-leap-prompt><![CDATA[{post_leap_prompt}]]></post-leap-prompt>
 </ellm-instance>
@@ -90,6 +94,7 @@ _MANIFEST_MAP = {
     "backend": "backend",
     "compressor-backend": "compressor_backend",
     "trigger-tokens": "trigger_tokens",
+    "chat-trigger-tokens": "chat_trigger_tokens",
     "compressed-budget": "compressed_budget",
     "cut-tokens": "cut_tokens",
     "k": "k",
@@ -213,3 +218,24 @@ def render_transcript(events) -> str:
         role = "User" if e["type"] == "prompt" else "Assistant"
         parts.append(f"[{e['ts']}] {role}:\n{e['text']}")
     return "\n\n---\n\n".join(parts)
+
+
+def estimate_tokens(text: str, chars_per_token: int) -> int:
+    """Text-only token estimate used for ELLM's retained chat context."""
+    return max(1, len(text) // max(1, chars_per_token)) if text else 0
+
+
+def session_chat_tokens(conn, session_id: str, chars_per_token: int) -> int:
+    """Estimate the ELLM-managed context retained in one backend session.
+
+    This deliberately counts only persisted prompt/response text. It excludes
+    the backend's hidden system, tool, and reasoning context, which is exposed
+    separately as the provider window metric.
+    """
+    if not session_id:
+        return 0
+    # Normal resumed turns send native messages, not the timestamped transcript
+    # representation used only while building a leap seed. A seed itself is
+    # stored as one prompt event, so its full serialized text is included here.
+    text = "".join(event["text"] for event in session_events(conn, session_id))
+    return estimate_tokens(text, chars_per_token)
