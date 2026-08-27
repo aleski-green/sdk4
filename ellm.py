@@ -111,8 +111,15 @@ def cmd_prompt(cfg, name, prompt):
         sys.exit(1)
     if res and res.get("ok"):
         print()  # newline after stream
-        chat = res.get("chat_tokens", 0)
-        trigger = res.get("trigger", 0)
+        manifest = store.load_manifest(cfg, name)
+        chat = res.get("chat_tokens")
+        if chat is None:
+            d = store.instance_dir(cfg, name)
+            conn = store.connect(os.path.join(d, "ellm.db"))
+            chat = store.session_chat_tokens(conn, res.get("session_id"),
+                                             manifest["chars_per_token"])
+            conn.close()
+        trigger = res.get("trigger", manifest["trigger_tokens"])
         print(f"[{name} | session {res.get('session_id')} | chat ~{chat:,}/{trigger:,} tokens]",
               file=sys.stderr)
 
@@ -135,10 +142,19 @@ def cmd_status(cfg, name):
         return
     res = rpc(cfg, name, {"cmd": "status"})
     if res:
+        manifest = store.load_manifest(cfg, name)
+        chat = res.get("chat_tokens")
+        if chat is None:
+            d = store.instance_dir(cfg, name)
+            conn = store.connect(os.path.join(d, "ellm.db"))
+            chat = store.session_chat_tokens(conn, res.get("session_id"),
+                                             manifest["chars_per_token"])
+            conn.close()
         print(f"{name}: running (pid {res['pid']})")
         print(f"  backend:        {res['backend']}")
         print(f"  session_id:     {res['session_id']}")
-        print(f"  chat_tokens:    ~{res['chat_tokens']:,} / {res['trigger_tokens']:,}")
+        print(f"  chat_tokens:    ~{chat:,} / "
+              f"{res.get('trigger_tokens', manifest['trigger_tokens']):,}")
         print(f"  leaps:          {res['leap_count']}")
 
 
