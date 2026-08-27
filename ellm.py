@@ -111,8 +111,11 @@ def cmd_prompt(cfg, name, prompt):
         sys.exit(1)
     if res and res.get("ok"):
         print()  # newline after stream
-        st, tr = res.get("session_tokens", 0), res.get("trigger", 0)
-        print(f"[{name} | session {res.get('session_id')} | ~{st:,}/{tr:,} tokens]",
+        chat = res.get("chat_tokens", 0)
+        window = res.get("provider_window_tokens", res.get("session_tokens", 0))
+        trigger = res.get("provider_trigger_tokens", res.get("trigger", 0))
+        print(f"[{name} | session {res.get('session_id')} | chat ~{chat:,} tokens | "
+              f"provider window ~{window:,}/{trigger:,}]",
               file=sys.stderr)
 
 
@@ -125,7 +128,12 @@ def cmd_status(cfg, name):
         conn = store.connect(os.path.join(d, "ellm.db"))
         print(f"{name}: daemon stopped")
         print(f"  session_id:     {store.get_state(conn, 'session_id')}")
-        print(f"  session_tokens: ~{int(store.get_state(conn, 'session_tokens', '0')):,}")
+        manifest = store.load_manifest(cfg, name)
+        session_id = store.get_state(conn, "session_id")
+        chat = store.session_chat_tokens(conn, session_id, manifest["chars_per_token"])
+        print(f"  chat_tokens:    ~{chat:,}")
+        print(f"  provider_window: ~{int(store.get_state(conn, 'session_tokens', '0')):,} / "
+              f"{manifest['trigger_tokens']:,}")
         print(f"  leaps:          {store.get_state(conn, 'leap_count', '0')}")
         conn.close()
         return
@@ -134,7 +142,9 @@ def cmd_status(cfg, name):
         print(f"{name}: running (pid {res['pid']})")
         print(f"  backend:        {res['backend']}")
         print(f"  session_id:     {res['session_id']}")
-        print(f"  session_tokens: ~{res['session_tokens']:,} / {res['trigger_tokens']:,}")
+        print(f"  chat_tokens:    ~{res['chat_tokens']:,}")
+        print(f"  provider_window: ~{res['provider_window_tokens']:,} / "
+              f"{res['provider_trigger_tokens']:,}")
         print(f"  leaps:          {res['leap_count']}")
 
 
@@ -165,9 +175,12 @@ def cmd_list(cfg):
         conn = store.connect(os.path.join(d, "ellm.db"))
         running = "running" if is_running(cfg, name) else "stopped"
         sid = store.get_state(conn, "session_id") or "-"
-        toks = int(store.get_state(conn, "session_tokens", "0"))
+        manifest = store.load_manifest(cfg, name)
+        chat = store.session_chat_tokens(conn, sid, manifest["chars_per_token"])
+        window = int(store.get_state(conn, "session_tokens", "0"))
         leaps = store.get_state(conn, "leap_count", "0")
-        print(f"{name:<20} {running:<8} session={sid:<38} ~{toks:>8,} tokens  leaps={leaps}")
+        print(f"{name:<20} {running:<8} session={sid:<38} "
+              f"chat=~{chat:>8,}  window=~{window:>8,}  leaps={leaps}")
         conn.close()
 
 

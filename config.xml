@@ -4,8 +4,10 @@
   <!-- empty = same as backend -->
   <compressor-backend></compressor-backend>
 
-  <!-- leap thresholds (estimated tokens) -->
+  <!-- provider-window safety threshold; includes hidden backend context -->
   <trigger-tokens>180000</trigger-tokens>
+  <!-- optional ELLM-visible chat threshold; 0 = disabled -->
+  <chat-trigger-tokens>0</chat-trigger-tokens>
   <compressed-budget>30000</compressed-budget>
   <cut-tokens>30000</cut-tokens>
   <k>3</k>

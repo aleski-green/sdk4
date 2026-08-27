@@ -150,6 +150,8 @@ def leap(conn, manifest: dict, inst_dir: str, log=print, timeout=None) -> str:
     store.set_state(conn, "leap_count", str(leap_no))
     store.log_event(conn, new_session, "prompt", {"text": seed, "seed": True})
     store.log_event(conn, new_session, "response", {"text": res.text})
+    if res.usage:
+        store.log_event(conn, new_session, "usage", res.usage)
     log("[leap] done: %s -> %s (context.md ~%s est tokens)" % (
         old_session, new_session, f"{est_tokens(context, cpt):,}"))
     return new_session

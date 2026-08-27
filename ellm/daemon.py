@@ -112,6 +112,8 @@ class Daemon:
 
             store.log_event(self.conn, res.session_id, "prompt", {"text": text})
             store.log_event(self.conn, res.session_id, "response", {"text": res.text})
+            if res.usage:
+                store.log_event(self.conn, res.session_id, "usage", res.usage)
             if not session_id:
                 store.set_state(self.conn, "session_id", res.session_id)
 
@@ -121,18 +123,29 @@ class Daemon:
             total = router.reconcile_session_tokens(
                 previous, res.usage_tokens, res.usage_is_window, estimated)
             store.set_state(self.conn, "session_tokens", total)
+            chat_tokens = store.session_chat_tokens(self.conn, res.session_id, cpt)
 
             final_session, final_tokens = res.session_id, total
-            if total >= manifest["trigger_tokens"]:
+            provider_limit = total >= manifest["trigger_tokens"]
+            chat_limit = (manifest["chat_trigger_tokens"] > 0 and
+                          chat_tokens >= manifest["chat_trigger_tokens"])
+            if provider_limit or chat_limit:
+                reason = "provider_window" if provider_limit else "chat_context"
                 send({"type": "leap", "phase": "start",
-                      "session_id": res.session_id, "session_tokens": total})
+                      "session_id": res.session_id, "session_tokens": total,
+                      "provider_window_tokens": total, "chat_tokens": chat_tokens,
+                      "reason": reason})
                 try:
                     final_session = leap_mod.leap(
                         self.conn, manifest, self.inst_dir, log=self.log,
                         timeout=timeout)
                     final_tokens = int(store.get_state(self.conn, "session_tokens", "0"))
+                    chat_tokens = store.session_chat_tokens(
+                        self.conn, final_session, cpt)
                     send({"type": "leap", "phase": "done",
-                          "session_id": final_session, "session_tokens": final_tokens})
+                          "session_id": final_session, "session_tokens": final_tokens,
+                          "provider_window_tokens": final_tokens,
+                          "chat_tokens": chat_tokens})
                 except Exception as e:
                     self.log(f"leap failed: {e}")
                     store.log_event(self.conn, res.session_id, "error",
@@ -140,7 +153,12 @@ class Daemon:
                     send({"type": "leap", "phase": "error", "message": str(e)})
 
             send({"type": "done", "ok": True, "session_id": final_session,
-                  "session_tokens": final_tokens, "trigger": manifest["trigger_tokens"]})
+                  # session_tokens and trigger remain for clients using the old RPC.
+                  "session_tokens": final_tokens, "trigger": manifest["trigger_tokens"],
+                  "provider_window_tokens": final_tokens,
+                  "provider_trigger_tokens": manifest["trigger_tokens"],
+                  "chat_tokens": chat_tokens,
+                  "chat_trigger_tokens": manifest["chat_trigger_tokens"]})
 
     def handle_status(self, send):
         manifest = store.load_manifest(self.cfg, self.name)
@@ -151,6 +169,12 @@ class Daemon:
                   "session_id": store.get_state(self.conn, "session_id"),
                   "session_tokens": int(store.get_state(self.conn, "session_tokens", "0")),
                   "trigger_tokens": manifest["trigger_tokens"],
+                  "provider_window_tokens": int(store.get_state(self.conn, "session_tokens", "0")),
+                  "provider_trigger_tokens": manifest["trigger_tokens"],
+                  "chat_tokens": store.session_chat_tokens(
+                      self.conn, store.get_state(self.conn, "session_id"),
+                      manifest["chars_per_token"]),
+                  "chat_trigger_tokens": manifest["chat_trigger_tokens"],
                   "leap_count": int(store.get_state(self.conn, "leap_count", "0")),
                   "pid": os.getpid()})
 

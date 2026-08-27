@@ -13,12 +13,14 @@ if ROOT not in sys.path:
 
 from ellm.daemon import Daemon
 from ellm.router import MockAdapter
+from ellm import store
 
 
 class DaemonTurnTests(unittest.TestCase):
     def setUp(self):
         MockAdapter.next_usage_tokens = None
         MockAdapter.next_usage_is_window = False
+        MockAdapter.next_usage = None
         self.tmp = tempfile.TemporaryDirectory()
         self.cfg_path = os.path.join(self.tmp.name, "config.xml")
         with open(self.cfg_path, "w") as f:
@@ -85,8 +87,33 @@ class DaemonTurnTests(unittest.TestCase):
         msgs = self._rpc({"cmd": "prompt", "text": "again"})
         done = [m for m in msgs if m["type"] == "done"][0]
         self.assertEqual(done["session_tokens"], 55)
+        self.assertEqual(done["provider_window_tokens"], 55)
+        self.assertEqual(done["chat_tokens"], store.session_chat_tokens(
+            self.daemon.conn, done["session_id"], 4))
         self.assertFalse(any(m["type"] == "leap" for m in msgs))
         self.assertFalse(any(m["type"] == "chunk" and "leaping" in m.get("text", "") for m in msgs))
+
+    def test_chat_trigger_is_distinct_from_provider_window_trigger(self):
+        self.daemon.cfg["chat_trigger_tokens"] = 1
+        MockAdapter.next_usage_tokens = 1
+        MockAdapter.next_usage_is_window = True
+        msgs = self._rpc({"cmd": "prompt", "text": "hello"})
+        start = next(m for m in msgs if m["type"] == "leap" and m["phase"] == "start")
+        self.assertEqual(start["reason"], "chat_context")
+        self.assertGreater(start["chat_tokens"], 1)
+        self.assertEqual(start["provider_window_tokens"], 1)
+
+    def test_raw_provider_usage_is_persisted(self):
+        MockAdapter.next_usage_tokens = 40
+        MockAdapter.next_usage_is_window = True
+        MockAdapter.next_usage = {"input_tokens": 30, "output_tokens": 10}
+        self._rpc({"cmd": "prompt", "text": "hello"})
+        row = self.daemon.conn.execute(
+            "SELECT data FROM events WHERE type='usage' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        self.assertEqual(json.loads(row[0]), {
+            "input_tokens": 30, "output_tokens": 10,
+        })
 
     def test_leap_is_a_protocol_event_not_a_chunk(self):
         # Force a leap by reporting a window at/over the trigger.
