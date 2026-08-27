@@ -83,13 +83,17 @@ class CodexParseTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 res = adapter.send(tmp, None, "hello world")
                 self.assertEqual(res.session_id, "tid-stdin")
+                self.assertIn("--sandbox", captured["cmd"])
+                self.assertIn("danger-full-access", captured["cmd"])
                 self.assertEqual(captured["cmd"][-1], "-")
                 self.assertNotIn("hello world", captured["cmd"])
                 self.assertTrue(captured["stdin"].startswith("hello world"))
 
                 captured.clear()
                 adapter.send(tmp, "tid-stdin", "follow up")
-                self.assertEqual(captured["cmd"][2], "resume")
+                self.assertIn("resume", captured["cmd"])
+                self.assertIn("--sandbox", captured["cmd"])
+                self.assertIn("danger-full-access", captured["cmd"])
                 self.assertEqual(captured["cmd"][-1], "-")
                 self.assertNotIn("follow up", captured["cmd"])
         finally:

@@ -14,6 +14,9 @@ pip install nothing   # Python 3.10+ stdlib only
 **Requirements:** Python 3.10+, and at least one backend CLI installed and authenticated:
 `codex` (OpenAI Codex CLI) and/or `kimi` (Kimi Code CLI). A `mock` backend exists for testing.
 
+Codex sessions run with `--sandbox danger-full-access` so they can use local desktop tools such
+as Blindly4. Prompts therefore have unrestricted local read/write and process access.
+
 ---
 
 ## Quickstart

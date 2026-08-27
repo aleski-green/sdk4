@@ -186,12 +186,15 @@ class CodexAdapter:
             out_file = tf.name
         try:
             # Prompt goes on stdin via `-` so large leap seeds cannot hit ARG_MAX.
+            # ELLM sessions are allowed to operate local desktop tools (for example
+            # blindly4), so Codex commands must not be confined to the workspace.
+            sandbox = ["--sandbox", "danger-full-access"]
             if session_id:
-                cmd = [self.binary, "exec", "resume", session_id,
+                cmd = [self.binary, "exec", *sandbox, "resume", session_id,
                        "--json", "--skip-git-repo-check",
                        "-o", out_file, "-"]
             else:
-                cmd = [self.binary, "exec",
+                cmd = [self.binary, "exec", *sandbox,
                        "--json", "--skip-git-repo-check",
                        "-C", work_dir,
                        "-o", out_file, "-"]
