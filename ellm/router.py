@@ -24,94 +24,14 @@ from typing import Callable, Optional
 
 OnChunk = Optional[Callable[[str], None]]
 
-# Fields that are subsets of another usage counter, not extra window tokens.
-_CACHED_USAGE_KEYS = {
-    "cached_input_tokens", "cachedInputTokens",
-    "cached_output_tokens", "cachedOutputTokens",
-    "cache_creation_input_tokens", "cache_read_input_tokens",
-}
-
-
 @dataclass
 class TurnResult:
     text: str
     session_id: str
-    usage_tokens: Optional[int] = None
-    # True when usage_tokens is the current context window after this turn
-    # (Codex input+output). False when it is a per-turn delta to accumulate.
-    usage_is_window: bool = False
-    # Raw backend usage is retained for auditing; usage_tokens is the normalized
-    # value used by the provider-window safety guard.
-    usage: Optional[dict] = None
 
 
 class BackendError(RuntimeError):
     pass
-
-
-def window_tokens_from_usage(usage):
-    """Current context window after a turn, from a vendor usage object.
-
-    Codex `turn.completed.usage` is per-turn, not cumulative, and has no
-    `total_tokens`. Typical fields:
-      input_tokens              full prompt/history this turn
-      cached_input_tokens       subset of input_tokens (do NOT add)
-      output_tokens
-      reasoning_output_tokens
-    Window ≈ input + output + reasoning.
-    """
-    if not isinstance(usage, dict) or not usage:
-        return None
-    explicit = usage.get("total_tokens")
-    if explicit is None:
-        explicit = usage.get("totalTokens")
-    if isinstance(explicit, int) and explicit > 0:
-        return explicit
-
-    inp = usage.get("input_tokens")
-    if inp is None:
-        inp = usage.get("inputTokens")
-    out = usage.get("output_tokens")
-    if out is None:
-        out = usage.get("outputTokens")
-    reason = usage.get("reasoning_output_tokens")
-    if reason is None:
-        reason = usage.get("reasoningOutputTokens")
-
-    if isinstance(inp, int):
-        total = inp
-        if isinstance(out, int):
-            total += out
-        if isinstance(reason, int):
-            total += reason
-        return total if total > 0 else None
-
-    total, found = 0, False
-    for key, value in usage.items():
-        if not isinstance(value, int):
-            continue
-        lower = key.lower()
-        if "token" not in lower:
-            continue
-        if key in _CACHED_USAGE_KEYS or "cached" in lower:
-            continue
-        total += value
-        found = True
-    return total if found and total > 0 else None
-
-
-def reconcile_session_tokens(previous, usage_tokens, usage_is_window, estimated_turn):
-    """Update session token count after a turn.
-
-    Window-sized usage (Codex) replaces the counter — it already includes history.
-    Otherwise accumulate this turn's new tokens.
-    """
-    previous = int(previous or 0)
-    if usage_tokens:
-        if usage_is_window:
-            return int(usage_tokens)
-        return previous + int(usage_tokens)
-    return previous + int(estimated_turn)
 
 
 def apply_agent_text(state, text, on_chunk):
@@ -234,7 +154,6 @@ def _run(cmd, work_dir, on_chunk=None, parse=None, timeout=None, stdin_data=None
 class CodexAdapter:
     name = "codex"
     binary = os.environ.get("ELLM_CODEX_BIN", "codex")
-    usage_is_window = True
 
     def _parse_jsonl(self, line, state, on_chunk):
         try:
@@ -247,13 +166,6 @@ class CodexAdapter:
         elif etype in ("item.completed", "item.updated", "item.delta",
                        "response.output_text.delta"):
             apply_agent_message_event(state, ev, on_chunk)
-        elif etype == "turn.completed":
-            usage = ev.get("usage") or {}
-            tokens = window_tokens_from_usage(usage)
-            if tokens:
-                state["usage_tokens"] = tokens
-            if isinstance(usage, dict):
-                state["usage"] = usage
         elif etype == "turn.failed":
             err = ev.get("error") or ev.get("message") or "turn.failed"
             if isinstance(err, dict):
@@ -306,9 +218,6 @@ class CodexAdapter:
             return TurnResult(
                 text=text,
                 session_id=state.get("session_id") or session_id,
-                usage_tokens=state.get("usage_tokens"),
-                usage_is_window=True,
-                usage=state.get("usage"),
             )
         finally:
             try:
@@ -356,15 +265,6 @@ class KimiAdapter:
                 for part in content:
                     if isinstance(part, dict) and part.get("type") == "text" and part.get("text"):
                         apply_agent_text(state, part["text"], on_chunk)
-        usage = ev.get("usage") or (msg.get("usage") if isinstance(msg, dict) else None)
-        tokens = window_tokens_from_usage(usage) if isinstance(usage, dict) else None
-        if tokens:
-            state["usage_tokens"] = tokens
-            # kimi usage is treated as a window when input_tokens is present
-            state["usage_is_window"] = "input_tokens" in usage or "inputTokens" in usage
-        if isinstance(usage, dict):
-            state["usage"] = usage
-
     def _exec(self, work_dir, prompt, session_id=None, on_chunk=None, timeout=None):
         cmd = [self.binary]
         if session_id and session_id != self.CONTINUE:
@@ -381,9 +281,6 @@ class KimiAdapter:
         return TurnResult(
             text=text,
             session_id=state.get("session_id") or session_id or self.CONTINUE,
-            usage_tokens=state.get("usage_tokens"),
-            usage_is_window=bool(state.get("usage_is_window")),
-            usage=state.get("usage"),
         )
 
     def send(self, work_dir, session_id, prompt, on_chunk=None, timeout=None) -> TurnResult:
@@ -407,24 +304,13 @@ class MockAdapter:
     name = "mock"
     compress_failures_left = 0
     last_compress_cwd = None
-    next_usage_tokens = None
-    next_usage_is_window = False
-    next_usage = None
-
     def send(self, work_dir, session_id, prompt, on_chunk=None, timeout=None) -> TurnResult:
         import uuid
         sid = session_id or "mock-%s" % uuid.uuid4().hex[:8]
         text = "[mock reply to %s chars] %r" % (len(prompt), prompt[:60])
         if on_chunk:
             on_chunk(text)
-        usage = MockAdapter.next_usage_tokens
-        window = MockAdapter.next_usage_is_window
-        MockAdapter.next_usage_tokens = None
-        MockAdapter.next_usage_is_window = False
-        raw_usage = MockAdapter.next_usage
-        MockAdapter.next_usage = None
-        return TurnResult(text=text, session_id=sid, usage_tokens=usage,
-                          usage_is_window=window, usage=raw_usage)
+        return TurnResult(text=text, session_id=sid)
 
     def compress(self, work_dir, full_prompt, timeout=None) -> str:
         MockAdapter.last_compress_cwd = work_dir

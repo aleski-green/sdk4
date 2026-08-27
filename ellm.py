@@ -112,10 +112,8 @@ def cmd_prompt(cfg, name, prompt):
     if res and res.get("ok"):
         print()  # newline after stream
         chat = res.get("chat_tokens", 0)
-        window = res.get("provider_window_tokens", res.get("session_tokens", 0))
         trigger = res.get("trigger", 0)
-        print(f"[{name} | session {res.get('session_id')} | chat ~{chat:,}/{trigger:,} tokens | "
-              f"provider window ~{window:,}]",
+        print(f"[{name} | session {res.get('session_id')} | chat ~{chat:,}/{trigger:,} tokens]",
               file=sys.stderr)
 
 
@@ -132,7 +130,6 @@ def cmd_status(cfg, name):
         session_id = store.get_state(conn, "session_id")
         chat = store.session_chat_tokens(conn, session_id, manifest["chars_per_token"])
         print(f"  chat_tokens:    ~{chat:,} / {manifest['trigger_tokens']:,}")
-        print(f"  provider_window: ~{int(store.get_state(conn, 'session_tokens', '0')):,}")
         print(f"  leaps:          {store.get_state(conn, 'leap_count', '0')}")
         conn.close()
         return
@@ -142,7 +139,6 @@ def cmd_status(cfg, name):
         print(f"  backend:        {res['backend']}")
         print(f"  session_id:     {res['session_id']}")
         print(f"  chat_tokens:    ~{res['chat_tokens']:,} / {res['trigger_tokens']:,}")
-        print(f"  provider_window: ~{res['provider_window_tokens']:,}")
         print(f"  leaps:          {res['leap_count']}")
 
 
@@ -175,10 +171,9 @@ def cmd_list(cfg):
         sid = store.get_state(conn, "session_id") or "-"
         manifest = store.load_manifest(cfg, name)
         chat = store.session_chat_tokens(conn, sid, manifest["chars_per_token"])
-        window = int(store.get_state(conn, "session_tokens", "0"))
         leaps = store.get_state(conn, "leap_count", "0")
         print(f"{name:<20} {running:<8} session={sid:<38} "
-              f"chat=~{chat:>8,}  window=~{window:>8,}  leaps={leaps}")
+              f"chat=~{chat:>8,}  leaps={leaps}")
         conn.close()
 
 

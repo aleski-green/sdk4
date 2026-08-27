@@ -34,26 +34,13 @@ class CodexParseTests(unittest.TestCase):
             adapter._parse_jsonl(json.dumps(ev), state, chunks.append)
         return state, chunks
 
-    def test_thread_id_and_window_tokens(self):
+    def test_thread_id_and_message_text(self):
         state, chunks = self._feed([
             {"type": "thread.started", "thread_id": "tid-1"},
             {"type": "item.completed",
              "item": {"type": "agent_message", "text": "hi"}},
-            {"type": "turn.completed", "usage": {
-                "input_tokens": 1000,
-                "cached_input_tokens": 900,
-                "output_tokens": 40,
-                "reasoning_output_tokens": 10,
-            }},
         ])
         self.assertEqual(state["session_id"], "tid-1")
-        self.assertEqual(state["usage_tokens"], 1050)
-        self.assertEqual(state["usage"], {
-            "input_tokens": 1000,
-            "cached_input_tokens": 900,
-            "output_tokens": 40,
-            "reasoning_output_tokens": 10,
-        })
         self.assertEqual(chunks, ["hi"])
 
     def test_delta_then_completed_does_not_repeat(self):
@@ -87,7 +74,7 @@ class CodexParseTests(unittest.TestCase):
         def fake_run(cmd, work_dir, on_chunk=None, parse=None, timeout=None, stdin_data=None):
             captured["cmd"] = list(cmd)
             captured["stdin"] = stdin_data
-            return {"session_id": "tid-stdin", "emitted": "ok", "usage_tokens": 10}, "", 0
+            return {"session_id": "tid-stdin", "emitted": "ok"}, "", 0
 
         orig = router_mod._run
         router_mod._run = fake_run

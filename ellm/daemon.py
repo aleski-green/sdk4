@@ -112,36 +112,25 @@ class Daemon:
 
             store.log_event(self.conn, res.session_id, "prompt", {"text": text})
             store.log_event(self.conn, res.session_id, "response", {"text": res.text})
-            if res.usage:
-                store.log_event(self.conn, res.session_id, "usage", res.usage)
             if not session_id:
                 store.set_state(self.conn, "session_id", res.session_id)
 
             cpt = manifest["chars_per_token"]
-            estimated = leap_mod.est_tokens(full_prompt + res.text, cpt)
-            previous = int(store.get_state(self.conn, "session_tokens", "0"))
-            total = router.reconcile_session_tokens(
-                previous, res.usage_tokens, res.usage_is_window, estimated)
-            store.set_state(self.conn, "session_tokens", total)
             chat_tokens = store.session_chat_tokens(self.conn, res.session_id, cpt)
 
-            final_session, final_tokens = res.session_id, total
+            final_session = res.session_id
             if chat_tokens >= manifest["trigger_tokens"]:
                 send({"type": "leap", "phase": "start",
-                      "session_id": res.session_id, "session_tokens": total,
-                      "provider_window_tokens": total, "chat_tokens": chat_tokens,
+                      "session_id": res.session_id, "chat_tokens": chat_tokens,
                       "reason": "chat_context"})
                 try:
                     final_session = leap_mod.leap(
                         self.conn, manifest, self.inst_dir, log=self.log,
                         timeout=timeout)
-                    final_tokens = int(store.get_state(self.conn, "session_tokens", "0"))
                     chat_tokens = store.session_chat_tokens(
                         self.conn, final_session, cpt)
                     send({"type": "leap", "phase": "done",
-                          "session_id": final_session, "session_tokens": final_tokens,
-                          "provider_window_tokens": final_tokens,
-                          "chat_tokens": chat_tokens})
+                          "session_id": final_session, "chat_tokens": chat_tokens})
                 except Exception as e:
                     self.log(f"leap failed: {e}")
                     store.log_event(self.conn, res.session_id, "error",
@@ -149,10 +138,7 @@ class Daemon:
                     send({"type": "leap", "phase": "error", "message": str(e)})
 
             send({"type": "done", "ok": True, "session_id": final_session,
-                  # session_tokens and trigger remain for clients using the old RPC.
-                  "session_tokens": final_tokens, "trigger": manifest["trigger_tokens"],
-                  "provider_window_tokens": final_tokens,
-                  "chat_tokens": chat_tokens})
+                  "trigger": manifest["trigger_tokens"], "chat_tokens": chat_tokens})
 
     def handle_status(self, send):
         manifest = store.load_manifest(self.cfg, self.name)
@@ -161,9 +147,7 @@ class Daemon:
                   "name": self.name,
                   "backend": manifest["backend"],
                   "session_id": store.get_state(self.conn, "session_id"),
-                  "session_tokens": int(store.get_state(self.conn, "session_tokens", "0")),
                   "trigger_tokens": manifest["trigger_tokens"],
-                  "provider_window_tokens": int(store.get_state(self.conn, "session_tokens", "0")),
                   "chat_tokens": store.session_chat_tokens(
                       self.conn, store.get_state(self.conn, "session_id"),
                       manifest["chars_per_token"]),

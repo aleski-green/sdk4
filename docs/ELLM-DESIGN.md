@@ -80,7 +80,7 @@ Two ways to achieve "alive":
 | Context ownership | In the live process | In the vendor's session store (same native context, nothing re-fed by us) |
 | Output parsing | Fragile (ANSI, redraws, spinners) | Clean: `--json` (codex) / `--output-format stream-json` (kimi) |
 | Crash recovery | Process death = session loss | Session is on disk; daemon restart is harmless |
-| Token accounting | Screen scraping | Structured usage events from JSONL stream |
+| Token accounting | Screen scraping | Estimate from ELLM's persisted conversation |
 
 **Decision (default, overridable): option B.** The *daemon* is the long-running process; the
 backend session is continuous via native resume. Semantically identical to "one hot session",
@@ -100,17 +100,10 @@ session scoping. Option A can be added later behind the same router interface if
 2. Daemon wraps the prompt with the instance's **`<turn-prompt>`** (injected with every turn).
 3. Router calls the backend with the current `session_id`, streams output back to the client
    and into `logs/` + the `events` table.
-4. Two token metrics are reported:
-   - Codex `turn.completed.usage` is per-turn. Window ≈ `input_tokens + output_tokens +
-     reasoning_output_tokens`. `cached_input_tokens` is a subset of input and is **not** added.
-   - This **provider window** includes backend-controlled system, tool, and agent context. When
-     reported, `session_tokens` is replaced with that value; it is never summed across turns and
-     is diagnostic only.
-   - **Chat tokens** are ELLM's text-only estimate of the persisted prompts and responses in the
-     active session. After a leap, only the new seed prompt and its acknowledgement are counted.
-     This is the equivalent of the visible chat length, but is approximate (`chars-per-token`).
-   - When it does not, we accumulate `chars / chars_per_token` over this turn's prompt+reply.
-   - Raw backend usage is also saved as `usage` events for diagnosis.
+4. Token accounting is backend-independent: **chat tokens** are ELLM's text-only estimate of the
+   persisted prompts and responses in the active session. After a leap, only the new seed prompt
+   and its acknowledgement are counted. This is the equivalent of the visible chat length, but is
+   approximate (`chars-per-token`).
    - Codex prompts (including leap seeds) are sent on stdin via `codex exec -` so they cannot
      hit `ARG_MAX`.
 5. If ELLM's visible-chat estimate reaches `trigger_tokens` (default 180k) → **leap** (below),
@@ -272,8 +265,8 @@ Installable `ellm` console script via pyproject.toml — v1.1, v1 runs as `pytho
 - **Daemon crash / double-start**: exclusive `fcntl` lock on `daemon.lock`; stale sockets are
   unlinked only by the process that holds the lock. Stop waits for in-flight turns before
   unlinking the socket.
-- **Token estimate drift**: Codex window size is `input+output+reasoning` (never cached). The
-  180k trigger is deliberately conservative vs. real model limits.
+- **Token estimate drift**: `chars-per-token` is an approximation. Tune it or use a lower
+  `trigger-tokens` threshold if a backend has a smaller practical context limit.
 - **Compressor failure**: retry once; on second failure carry the slice *truncated* to its
   chunk budget and log an `error` event — leap never blocks the session. Prompts may contain
   extra `{braces}`; only `{CHUNK_TOKENS}` / `{CHUNK_CHARS}` are substituted.
@@ -287,8 +280,7 @@ Installable `ellm` console script via pyproject.toml — v1.1, v1 runs as `pytho
 1. **M1** — router (codex adapter) + store + daemon + `-p` turn flow, no leap. Manual test: multi-turn memory.
 2. **M2** — leap.py end-to-end with fake 180k trigger (small thresholds) + `leaps` table + context.md.
 3. **M3** — kimi adapter, manifest overrides, `list`/`--status`/`--stop`.
-4. **M4** — polish: pyproject console script, real-usage reconciliation, docs. *(reconciliation
-   and tests landed in 0.1.1; console script still open)*
+4. **M4** — polish: pyproject console script and docs. *(console script still open)*
 
 ## 13. Defaults I chose where you said "idk / I guess" (flag if you disagree)
 

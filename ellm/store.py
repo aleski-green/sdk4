@@ -224,9 +224,8 @@ def estimate_tokens(text: str, chars_per_token: int) -> int:
 def session_chat_tokens(conn, session_id: str, chars_per_token: int) -> int:
     """Estimate the ELLM-managed context retained in one backend session.
 
-    This deliberately counts only persisted prompt/response text. It excludes
-    the backend's hidden system, tool, and reasoning context, which is exposed
-    separately as the provider window metric.
+    This deliberately counts only persisted prompt/response text, so it is
+    consistent across backends.
     """
     if not session_id:
         return 0
