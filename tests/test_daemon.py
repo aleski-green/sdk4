@@ -58,17 +58,19 @@ class DaemonTurnTests(unittest.TestCase):
 
     def _rpc(self, obj):
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.settimeout(5)
-        s.connect(self.daemon.sock_path)
-        s.sendall((json.dumps(obj) + "\n").encode())
-        fp = s.makefile("r")
-        msgs = []
-        for line in fp:
-            msgs.append(json.loads(line))
-            if msgs[-1].get("type") in ("done", "error", "status"):
-                break
-        s.close()
-        return msgs
+        try:
+            s.settimeout(5)
+            s.connect(self.daemon.sock_path)
+            s.sendall((json.dumps(obj) + "\n").encode())
+            fp = s.makefile("r")
+            msgs = []
+            for line in fp:
+                msgs.append(json.loads(line))
+                if msgs[-1].get("type") in ("done", "error", "status"):
+                    break
+            return msgs
+        finally:
+            s.close()
 
     def test_window_usage_does_not_double_count(self):
         MockAdapter.next_usage_tokens = 40
@@ -98,6 +100,48 @@ class DaemonTurnTests(unittest.TestCase):
         self.assertEqual(leap_msgs[0]["phase"], "start")
         self.assertEqual(leap_msgs[-1]["phase"], "done")
         self.assertFalse(any(m["type"] == "chunk" and "leaping" in m.get("text", "") for m in msgs))
+
+    def test_stop_rejects_a_prompt_already_waiting_in_the_queue(self):
+        original_send = MockAdapter.send
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow_send(adapter, work_dir, session_id, prompt, on_chunk=None, timeout=None):
+            if prompt == "first":
+                started.set()
+                self.assertTrue(release.wait(3), "test did not release active turn")
+            return original_send(adapter, work_dir, session_id, prompt, on_chunk, timeout)
+
+        MockAdapter.send = slow_send
+        try:
+            first, queued = {}, {}
+            first_thread = threading.Thread(
+                target=lambda: first.setdefault("msgs", self._rpc({"cmd": "prompt", "text": "first"})))
+            first_thread.start()
+            self.assertTrue(started.wait(2), "first prompt did not start")
+
+            queued_thread = threading.Thread(
+                target=lambda: queued.setdefault("msgs", self._rpc({"cmd": "prompt", "text": "second"})))
+            queued_thread.start()
+            deadline = time.time() + 2
+            while len(self.daemon.turn_lock._waiters) < 2:
+                if time.time() > deadline:
+                    self.fail("second prompt did not enter FIFO queue")
+                time.sleep(0.01)
+
+            stopped = self._rpc({"cmd": "stop"})
+            self.assertEqual(stopped[-1]["type"], "done")
+            release.set()
+            first_thread.join(timeout=3)
+            queued_thread.join(timeout=3)
+
+            self.assertFalse(first_thread.is_alive())
+            self.assertFalse(queued_thread.is_alive())
+            self.assertEqual(queued["msgs"][-1]["type"], "error")
+            self.assertEqual(queued["msgs"][-1]["message"], "daemon is stopping")
+        finally:
+            release.set()
+            MockAdapter.send = original_send
 
 
 if __name__ == "__main__":

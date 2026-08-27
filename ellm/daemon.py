@@ -84,6 +84,13 @@ class Daemon:
 
     def handle_prompt(self, text: str, send):
         with self.turn_lock, self.db_lock:
+            # A prompt may have been accepted just before a stop request and
+            # then waited in the FIFO queue. Do not start it during shutdown:
+            # stop waits only for the turn that was already in flight.
+            if not self.running:
+                send({"type": "error", "message": "daemon is stopping"})
+                return
+
             manifest = store.load_manifest(self.cfg, self.name)
             session_id = store.get_state(self.conn, "session_id")
             full_prompt = (manifest["turn_prompt"] + "\n\n" + text).strip() \

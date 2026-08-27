@@ -143,9 +143,9 @@ def cmd_stop(cfg, name):
         print(f"{name}: not running")
         return
     rpc(cfg, name, {"cmd": "stop"})
-    for _ in range(100):
-        if not is_running(cfg, name):
-            break
+    # The daemon only removes its socket after the active turn exits. Do not
+    # report success while its singleton lock is still held.
+    while is_running(cfg, name):
         time.sleep(0.1)
     print(f"{name}: stopped (session persists; next -p resumes it)")
 
