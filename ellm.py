@@ -54,7 +54,7 @@ def ensure_daemon(cfg, name):
         start_new_session=True,
     )
     sp = socket_path(cfg, name)
-    for _ in range(100):
+    for _ in range(150):
         if os.path.exists(sp) and is_running(cfg, name):
             return
         time.sleep(0.1)
@@ -77,6 +77,14 @@ def rpc(cfg, name, obj, stream=False):
         mtype = msg.get("type")
         if mtype == "chunk" and stream:
             print(msg["text"], end="", flush=True)
+        elif mtype == "leap":
+            phase = msg.get("phase")
+            if phase == "start":
+                print("\n[ellm] context limit reached — leaping...", file=sys.stderr)
+            elif phase == "done":
+                print("[ellm] leaped to session %s" % msg.get("session_id"), file=sys.stderr)
+            elif phase == "error":
+                print("[ellm] leap failed: %s" % msg.get("message"), file=sys.stderr)
         elif mtype == "error":
             print(f"\nerror: {msg.get('message')}", file=sys.stderr)
             result = msg
@@ -135,6 +143,10 @@ def cmd_stop(cfg, name):
         print(f"{name}: not running")
         return
     rpc(cfg, name, {"cmd": "stop"})
+    # The daemon only removes its socket after the active turn exits. Do not
+    # report success while its singleton lock is still held.
+    while is_running(cfg, name):
+        time.sleep(0.1)
     print(f"{name}: stopped (session persists; next -p resumes it)")
 
 
@@ -159,6 +171,9 @@ def cmd_list(cfg):
         conn.close()
 
 
+RESERVED_NAMES = {"list"}
+
+
 def main():
     ap = argparse.ArgumentParser(prog="ellm", description="eternal llm")
     ap.add_argument("name", nargs="?", help="instance name (or 'list')")
@@ -168,9 +183,17 @@ def main():
     args = ap.parse_args()
 
     cfg = store.load_global_config()
+    wants_instance = args.prompt is not None or args.status or args.stop
     if args.name == "list" or not args.name:
+        if wants_instance and args.name == "list":
+            print("error: instance name 'list' is reserved; use a different name",
+                  file=sys.stderr)
+            sys.exit(2)
         cmd_list(cfg)
     elif args.prompt is not None:
+        if args.name in RESERVED_NAMES:
+            print("error: instance name %r is reserved" % args.name, file=sys.stderr)
+            sys.exit(2)
         cmd_prompt(cfg, args.name, args.prompt)
     elif args.status:
         cmd_status(cfg, args.name)

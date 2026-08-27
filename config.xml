@@ -14,6 +14,8 @@
   <instances-dir>ellms/</instances-dir>
   <!-- daemon shuts down after N seconds idle; 0 = never -->
   <idle-timeout>0</idle-timeout>
+  <!-- per-turn CLI timeout in seconds; 0 = never -->
+  <turn-timeout>600</turn-timeout>
 
   <compressor-prompt><![CDATA[You are a memory compressor for an eternal LLM session.
 Compress the following conversation slice into a dense factual summary of at most {CHUNK_TOKENS} tokens (~{CHUNK_CHARS} characters).

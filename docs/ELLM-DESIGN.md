@@ -1,6 +1,6 @@
-# ELLM — Eternal LLM · Design Document (v0.1, for review)
+# ELLM — Eternal LLM · Design Document (v0.1.1)
 
-Status: **DRAFT — awaiting approval before implementation**
+Status: **implemented** (M1–M3 plus robustness fixes). Tests: `python -m unittest discover -s tests`.
 
 ## 1. What ellm is
 
@@ -100,11 +100,17 @@ session scoping. Option A can be added later behind the same router interface if
 2. Daemon wraps the prompt with the instance's **`<turn-prompt>`** (injected with every turn).
 3. Router calls the backend with the current `session_id`, streams output back to the client
    and into `logs/` + the `events` table.
-4. Token estimate updated: `tokens ≈ chars / chars_per_token` (default 4, configurable),
-   counted over everything sent+received this session. (If a backend reports real usage in its
-   JSON stream, we prefer that and reconcile.)
+4. Token accounting is **current context window**, not a sum of turn deltas:
+   - Codex `turn.completed.usage` is per-turn. Window ≈ `input_tokens + output_tokens +
+     reasoning_output_tokens`. `cached_input_tokens` is a subset of input and is **not** added.
+   - When the backend reports a window, `session_tokens` is replaced with that value.
+   - When it does not, we accumulate `chars / chars_per_token` over this turn's prompt+reply.
+   - Codex prompts (including leap seeds) are sent on stdin via `codex exec -` so they cannot
+     hit `ARG_MAX`.
 5. If `session_tokens ≥ trigger_tokens` (default 180k) → **leap** (below), then the *next*
    turn goes to the new session. Current turn always completes first — leap happens between turns.
+   Leap progress is a `{type:"leap", phase:...}` protocol event printed on stderr, never mixed
+   into the model stdout stream.
 
 ## 6. Leap algorithm (leap.py)
 
@@ -112,12 +118,16 @@ Triggered when session context ≥ `trigger_tokens` (default 180k):
 
 1. **Extract** the full ordered transcript of the current session (from our `events` log —
    every prompt and response is already stored, so no scraping needed).
-2. **CUT**: split off the *last* `cut_tokens` (default 30k) verbatim.
-3. **Slice** the remaining ~150k chronologically into `K` equal parts (default K=3).
+2. **CUT**: split off the *last* `cut_tokens` (default 30k) verbatim, on **turn boundaries**
+   (never mid-message).
+3. **Slice** the remaining ~150k chronologically into `K` equal parts (default K=3), also on
+   turn boundaries.
 4. **Compress**: spawn K independent one-shot compressor calls (same backend by default,
    `compressor_backend` overridable — e.g. a cheaper model). Each gets:
    `compressor_prompt` (from config) + its slice, instructed to produce ≤ `chunk_tokens`
-   (default `compressed_budget / K` = 30k/3 = **10k tokens**).
+   (default `compressed_budget / K` = 30k/3 = **10k tokens**). Retry once; on second failure
+   carry the slice truncated to the chunk budget. Compressor cwd is isolated so it cannot
+   steal the main session (`--ephemeral` on Codex; a temp dir on Kimi).
 5. **Assemble** `context.md`:
    ```
    # Leap <N> — <timestamp>
@@ -150,6 +160,8 @@ identity are *instance personality*. So:
   <k>3</k>
   <chars-per-token>4</chars-per-token>
   <instances-dir>ellms/</instances-dir>
+  <idle-timeout>0</idle-timeout>     <!-- seconds; 0 = never -->
+  <turn-timeout>600</turn-timeout>   <!-- per-turn CLI timeout; 0 = never -->
   <compressor-prompt><![CDATA[
     You are a memory compressor. Compress the following conversation
     slice into a dense factual summary of at most {CHUNK_TOKENS} tokens.
@@ -219,8 +231,10 @@ ellm <NAME> --status          detail: session id, est. tokens, headroom, last le
 ellm <NAME> --stop            stop daemon (session persists; next -p resumes it)
 ```
 
-- Concurrent prompts to the same instance are **queued** FIFO by the daemon.
-- `-p` streams the response to stdout as it arrives; exit code 0 on success.
+- Concurrent prompts to the same instance are **queued** FIFO by the daemon (ticket lock, not
+  `threading.Lock`).
+- `-p` streams the response to stdout as it arrives; leap notices go to stderr; exit code 0 on success.
+- `list` is a reserved instance name.
 - REPL mode, `--leap-now`, `--history`: **post-v1**.
 
 ## 10. Repo layout
@@ -236,6 +250,8 @@ sdk4/
     router.py                # backend adapters (codex, kimi)
     leap.py                  # leap / compression logic
     store.py                 # sqlite + xml
+    __main__.py              # python -m ellm
+  tests/                     # stdlib unittest
   docs/ELLM-DESIGN.md        # this doc
   ellms/                     # instances (gitignored)
 ```
@@ -246,11 +262,16 @@ Installable `ellm` console script via pyproject.toml — v1.1, v1 runs as `pytho
 ## 11. Edge cases & decisions taken
 
 - **Leap mid-queue**: queued prompts wait; leap runs; they continue on the new session.
-- **Daemon crash**: backend session persists on disk → next `-p` just resumes. Zero loss.
-- **Token estimate drift**: reconcile from backend-reported usage when present; the 180k
-  trigger is deliberately conservative vs. real model limits.
+- **Daemon crash / double-start**: exclusive `fcntl` lock on `daemon.lock`; stale sockets are
+  unlinked only by the process that holds the lock. Stop waits for in-flight turns before
+  unlinking the socket.
+- **Token estimate drift**: Codex window size is `input+output+reasoning` (never cached). The
+  180k trigger is deliberately conservative vs. real model limits.
 - **Compressor failure**: retry once; on second failure carry the slice *truncated* to its
-  chunk budget and log an `error` event — leap never blocks the session.
+  chunk budget and log an `error` event — leap never blocks the session. Prompts may contain
+  extra `{braces}`; only `{CHUNK_TOKENS}` / `{CHUNK_CHARS}` are substituted.
+- **CLI hang / deadlock**: stderr is drained on a side thread; each turn has a timeout
+  (default 600s). `turn.failed` and JSONL `error` events fail the turn.
 - **First turn ever**: session starts fresh; if manifest has identity prompt, it's the
   turn-prompt doing that job — no separate system prompt needed.
 
@@ -259,7 +280,8 @@ Installable `ellm` console script via pyproject.toml — v1.1, v1 runs as `pytho
 1. **M1** — router (codex adapter) + store + daemon + `-p` turn flow, no leap. Manual test: multi-turn memory.
 2. **M2** — leap.py end-to-end with fake 180k trigger (small thresholds) + `leaps` table + context.md.
 3. **M3** — kimi adapter, manifest overrides, `list`/`--status`/`--stop`.
-4. **M4** — polish: pyproject console script, real-usage reconciliation, docs.
+4. **M4** — polish: pyproject console script, real-usage reconciliation, docs. *(reconciliation
+   and tests landed in 0.1.1; console script still open)*
 
 ## 13. Defaults I chose where you said "idk / I guess" (flag if you disagree)
 
