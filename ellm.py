@@ -112,15 +112,16 @@ def cmd_prompt(cfg, name, prompt):
     if res and res.get("ok"):
         print()  # newline after stream
         manifest = store.load_manifest(cfg, name)
-        chat = res.get("chat_tokens")
-        if chat is None:
+        context = res.get("context_tokens")
+        if context is None:
             d = store.instance_dir(cfg, name)
             conn = store.connect(os.path.join(d, "ellm.db"))
-            chat = store.session_chat_tokens(conn, res.get("session_id"),
-                                             manifest["chars_per_token"])
+            context = store.session_context_tokens(
+                conn, res.get("session_id"), manifest["chars_per_token"],
+                manifest["tool_call_tokens"])
             conn.close()
         trigger = res.get("trigger", manifest["trigger_tokens"])
-        print(f"[{name} | session {res.get('session_id')} | chat ~{chat:,}/{trigger:,} tokens]",
+        print(f"[{name} | session {res.get('session_id')} | context ~{context:,}/{trigger:,} tokens]",
               file=sys.stderr)
 
 
@@ -135,25 +136,27 @@ def cmd_status(cfg, name):
         print(f"  session_id:     {store.get_state(conn, 'session_id')}")
         manifest = store.load_manifest(cfg, name)
         session_id = store.get_state(conn, "session_id")
-        chat = store.session_chat_tokens(conn, session_id, manifest["chars_per_token"])
-        print(f"  chat_tokens:    ~{chat:,} / {manifest['trigger_tokens']:,}")
+        context = store.session_context_tokens(
+            conn, session_id, manifest["chars_per_token"], manifest["tool_call_tokens"])
+        print(f"  context_tokens: ~{context:,} / {manifest['trigger_tokens']:,}")
         print(f"  leaps:          {store.get_state(conn, 'leap_count', '0')}")
         conn.close()
         return
     res = rpc(cfg, name, {"cmd": "status"})
     if res:
         manifest = store.load_manifest(cfg, name)
-        chat = res.get("chat_tokens")
-        if chat is None:
+        context = res.get("context_tokens")
+        if context is None:
             d = store.instance_dir(cfg, name)
             conn = store.connect(os.path.join(d, "ellm.db"))
-            chat = store.session_chat_tokens(conn, res.get("session_id"),
-                                             manifest["chars_per_token"])
+            context = store.session_context_tokens(
+                conn, res.get("session_id"), manifest["chars_per_token"],
+                manifest["tool_call_tokens"])
             conn.close()
         print(f"{name}: running (pid {res['pid']})")
         print(f"  backend:        {res['backend']}")
         print(f"  session_id:     {res['session_id']}")
-        print(f"  chat_tokens:    ~{chat:,} / "
+        print(f"  context_tokens: ~{context:,} / "
               f"{res.get('trigger_tokens', manifest['trigger_tokens']):,}")
         print(f"  leaps:          {res['leap_count']}")
 
@@ -186,10 +189,11 @@ def cmd_list(cfg):
         running = "running" if is_running(cfg, name) else "stopped"
         sid = store.get_state(conn, "session_id") or "-"
         manifest = store.load_manifest(cfg, name)
-        chat = store.session_chat_tokens(conn, sid, manifest["chars_per_token"])
+        context = store.session_context_tokens(
+            conn, sid, manifest["chars_per_token"], manifest["tool_call_tokens"])
         leaps = store.get_state(conn, "leap_count", "0")
         print(f"{name:<20} {running:<8} session={sid:<38} "
-              f"chat=~{chat:>8,}  leaps={leaps}")
+              f"context=~{context:>8,}  leaps={leaps}")
         conn.close()
 
 

@@ -100,13 +100,14 @@ session scoping. Option A can be added later behind the same router interface if
 2. Daemon wraps the prompt with the instance's **`<turn-prompt>`** (injected with every turn).
 3. Router calls the backend with the current `session_id`, streams output back to the client
    and into `logs/` + the `events` table.
-4. Token accounting is backend-independent: **chat tokens** are ELLM's text-only estimate of the
-   persisted prompts and responses in the active session. After a leap, only the new seed prompt
-   and its acknowledgement are counted. This is the equivalent of the visible chat length, but is
-   approximate (`chars-per-token`).
+4. Token accounting is backend-independent: **context tokens** are ELLM's estimate of the
+   persisted prompts and responses in the active session plus `tool-call-tokens` (default 3,000)
+   for every completed tool call an adapter reports. After a leap, only the new seed prompt and
+   its acknowledgement are counted. Text remains approximate (`chars-per-token`); the tool-call
+   budget captures unpersisted tool output and agent work.
    - Codex prompts (including leap seeds) are sent on stdin via `codex exec -` so they cannot
      hit `ARG_MAX`.
-5. If ELLM's visible-chat estimate reaches `trigger_tokens` (default 180k) → **leap** (below),
+5. If ELLM's context estimate reaches `trigger_tokens` (default 180k) → **leap** (below),
    then the *next*
    turn goes to the new session. Current turn always completes first — leap happens between turns.
    Leap progress is a `{type:"leap", phase:...}` protocol event printed on stderr, never mixed
@@ -114,7 +115,7 @@ session scoping. Option A can be added later behind the same router interface if
 
 ## 6. Leap algorithm (leap.py)
 
-Triggered when the ELLM-managed chat context reaches `trigger-tokens` (default 180k):
+Triggered when the ELLM-managed context estimate reaches `trigger-tokens` (default 180k):
 
 1. **Extract** the full ordered transcript of the current session (from our `events` log —
    every prompt and response is already stored, so no scraping needed).
@@ -159,6 +160,7 @@ identity are *instance personality*. So:
   <cut-tokens>30000</cut-tokens>
   <k>3</k>
   <chars-per-token>4</chars-per-token>
+  <tool-call-tokens>3000</tool-call-tokens>
   <instances-dir>ellms/</instances-dir>
   <idle-timeout>0</idle-timeout>     <!-- seconds; 0 = never -->
   <turn-timeout>600</turn-timeout>   <!-- per-turn CLI timeout; 0 = never -->
@@ -186,6 +188,7 @@ Created at instance creation, copied from global defaults, then freely editable:
   <backend>kimi</backend>               <!-- override; optional -->
   <!-- optional per-instance threshold overrides: -->
   <!-- <trigger-tokens>150000</trigger-tokens> -->
+  <!-- <tool-call-tokens>3000</tool-call-tokens> -->
   <turn-prompt><![CDATA[
     You are Smith, a long-running coding assistant...
     (injected with EVERY turn)
@@ -219,8 +222,8 @@ CREATE TABLE leaps (
 );
 ```
 
-Plus a tiny `state` table (current session id, cumulative token count) — or kept in the
-manifest; default: `state` table, manifest stays human-authored only.
+Plus a tiny `state` table (current session id and leap count). Context estimates are derived
+from the session's persisted events; the manifest stays human-authored only.
 
 ## 9. CLI surface (v1)
 
@@ -265,8 +268,8 @@ Installable `ellm` console script via pyproject.toml — v1.1, v1 runs as `pytho
 - **Daemon crash / double-start**: exclusive `fcntl` lock on `daemon.lock`; stale sockets are
   unlinked only by the process that holds the lock. Stop waits for in-flight turns before
   unlinking the socket.
-- **Token estimate drift**: `chars-per-token` is an approximation. Tune it or use a lower
-  `trigger-tokens` threshold if a backend has a smaller practical context limit.
+- **Token estimate drift**: `chars-per-token` and `tool-call-tokens` are estimates. Tune either,
+  or use a lower `trigger-tokens` threshold if a backend has a smaller practical context limit.
 - **Compressor failure**: retry once; on second failure carry the slice *truncated* to its
   chunk budget and log an `error` event — leap never blocks the session. Prompts may contain
   extra `{braces}`; only `{CHUNK_TOKENS}` / `{CHUNK_CHARS}` are substituted.

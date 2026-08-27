@@ -28,6 +28,7 @@ OnChunk = Optional[Callable[[str], None]]
 class TurnResult:
     text: str
     session_id: str
+    tool_calls: int = 0
 
 
 class BackendError(RuntimeError):
@@ -154,6 +155,10 @@ def _run(cmd, work_dir, on_chunk=None, parse=None, timeout=None, stdin_data=None
 class CodexAdapter:
     name = "codex"
     binary = os.environ.get("ELLM_CODEX_BIN", "codex")
+    _TOOL_ITEM_TYPES = {
+        "command_execution", "mcp_tool_call", "web_search", "tool_call",
+        "custom_tool_call", "function_call",
+    }
 
     def _parse_jsonl(self, line, state, on_chunk):
         try:
@@ -165,6 +170,9 @@ class CodexAdapter:
             state["session_id"] = ev["thread_id"]
         elif etype in ("item.completed", "item.updated", "item.delta",
                        "response.output_text.delta"):
+            if (etype == "item.completed"
+                    and (ev.get("item") or {}).get("type") in self._TOOL_ITEM_TYPES):
+                state["tool_calls"] = state.get("tool_calls", 0) + 1
             apply_agent_message_event(state, ev, on_chunk)
         elif etype == "turn.failed":
             err = ev.get("error") or ev.get("message") or "turn.failed"
@@ -221,6 +229,7 @@ class CodexAdapter:
             return TurnResult(
                 text=text,
                 session_id=state.get("session_id") or session_id,
+                tool_calls=state.get("tool_calls", 0),
             )
         finally:
             try:

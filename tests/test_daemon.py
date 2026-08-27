@@ -78,8 +78,8 @@ class DaemonTurnTests(unittest.TestCase):
 
         msgs = self._rpc({"cmd": "prompt", "text": "again"})
         done = [m for m in msgs if m["type"] == "done"][0]
-        self.assertEqual(done["chat_tokens"], store.session_chat_tokens(
-            self.daemon.conn, done["session_id"], 4))
+        self.assertEqual(done["context_tokens"], store.session_context_tokens(
+            self.daemon.conn, done["session_id"], 4, 3_000))
         self.assertFalse(any(m["type"] == "leap" for m in msgs))
         self.assertFalse(any(m["type"] == "chunk" and "leaping" in m.get("text", "") for m in msgs))
 
@@ -87,8 +87,26 @@ class DaemonTurnTests(unittest.TestCase):
         self.daemon.cfg["trigger_tokens"] = 1
         msgs = self._rpc({"cmd": "prompt", "text": "hello"})
         start = next(m for m in msgs if m["type"] == "leap" and m["phase"] == "start")
-        self.assertEqual(start["reason"], "chat_context")
-        self.assertGreater(start["chat_tokens"], 1)
+        self.assertEqual(start["reason"], "estimated_context")
+        self.assertGreater(start["context_tokens"], 1)
+
+    def test_tool_budget_contributes_to_the_leap_estimate(self):
+        original_send = MockAdapter.send
+
+        def one_tool(adapter, work_dir, session_id, prompt, on_chunk=None, timeout=None):
+            res = original_send(adapter, work_dir, session_id, prompt, on_chunk, timeout)
+            from ellm.router import TurnResult
+            return TurnResult(text=res.text, session_id=res.session_id, tool_calls=1)
+
+        MockAdapter.send = one_tool
+        self.daemon.cfg["trigger_tokens"] = 3_000
+        try:
+            msgs = self._rpc({"cmd": "prompt", "text": "hello"})
+            start = next(m for m in msgs if m["type"] == "leap" and m["phase"] == "start")
+            self.assertEqual(start["reason"], "estimated_context")
+            self.assertGreaterEqual(start["context_tokens"], 3_000)
+        finally:
+            MockAdapter.send = original_send
 
     def test_leap_is_a_protocol_event_not_a_chunk(self):
         # Force a leap by making the local chat estimate reach the trigger.

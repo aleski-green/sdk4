@@ -36,7 +36,8 @@ python3 ellm.py smith --stop     # stop daemon; session survives, next -p resume
 ```
 
 Output: the model's reply on **stdout**, one status line on **stderr** showing
-ELLM's retained chat estimate — so stdout stays pipeable.
+ELLM's retained context estimate — saved chat text plus a 3,000-token budget for
+each completed tool call — so stdout stays pipeable.
 
 ---
 
@@ -45,7 +46,7 @@ ELLM's retained chat estimate — so stdout stays pipeable.
 | Command | What it does |
 |---|---|
 | `ellm.py <NAME> -p '<PROMPT>'` | Send a prompt. Auto-creates instance + daemon on first use. Streams the reply. |
-| `ellm.py list` | All instances: running/stopped, session id, chat tokens, leap count |
+| `ellm.py list` | All instances: running/stopped, session id, context estimate, leap count |
 | `ellm.py <NAME> --status` | Detail for one instance (works whether daemon is up or not) |
 | `ellm.py <NAME> --stop` | Graceful daemon stop (finishes the in-flight turn). Session persists |
 
@@ -56,7 +57,7 @@ Notes:
 
 ## How a leap works (automatic)
 
-1. ELLM's retained chat estimate ≥ `trigger-tokens` (default 180 000) → leap fires
+1. ELLM's retained context estimate ≥ `trigger-tokens` (default 180 000) → leap fires
    *between* turns.
 2. Everything except the last `cut-tokens` (30k, kept verbatim = **CUT**) is split
    chronologically into **K** slices (K=3) on turn boundaries.
@@ -72,6 +73,7 @@ truncated — a leap never blocks the session.
 ## Configuration
 
 **Global defaults — `config.xml` (repo root):** backend, thresholds, K, chars-per-token,
+tool-call-tokens,
 compressor prompt, default prompts, `turn-timeout` (600s).
 
 **Per instance — `ellms/<NAME>/ellm-manifest.xml`** (created on first use, hand-editable;
@@ -90,7 +92,7 @@ overrides global):
 Resolution order: manifest → `config.xml` → built-in defaults. Edits apply live
 (re-read every turn). Useful overrides: `backend`, `compressor-backend` (cheaper model
 for compression), `trigger-tokens`, `compressed-budget`, `cut-tokens`, `k`,
-`chars-per-token`, `turn-timeout`.
+`chars-per-token`, `tool-call-tokens`, `turn-timeout`.
 
 ## Instance folder anatomy — `ellms/<NAME>/`
 
@@ -117,6 +119,7 @@ in the manifest. Handy with tiny thresholds to watch leaps happen fast:
 ```xml
 <backend>mock</backend>
 <trigger-tokens>100</trigger-tokens>
+<tool-call-tokens>3000</tool-call-tokens>
 <compressed-budget>60</compressed-budget>
 <cut-tokens>50</cut-tokens>
 ```
@@ -131,6 +134,6 @@ Run the test suite: `python3 -m unittest discover -s tests`
 | codex: `exited 1 ... not logged in` | Run `codex login` once |
 | Backend CLI not on PATH | `ELLM_CODEX_BIN=/path/to/codex` / `ELLM_KIMI_BIN=/path/to/kimi` |
 | Stale state after kill -9 | Just run `-p` again — session resumes; daemon cleans its own socket |
-| Leap too early/late | Tune `trigger-tokens`; the estimate is based on stored chat text and `chars-per-token`. |
+| Leap too early/late | Tune `trigger-tokens`, `chars-per-token`, or `tool-call-tokens`; the estimate includes saved chat text and a fixed budget per completed tool call. |
 
 Design doc: [docs/ELLM-DESIGN.md](docs/ELLM-DESIGN.md)

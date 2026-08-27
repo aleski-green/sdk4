@@ -53,6 +53,15 @@ class CodexParseTests(unittest.TestCase):
         self.assertEqual("".join(chunks), "Hello")
         self.assertEqual(state["emitted"], "Hello")
 
+    def test_completed_tool_call_is_counted_once(self):
+        state, _ = self._feed([
+            {"type": "item.updated",
+             "item": {"type": "command_execution", "command": "pwd"}},
+            {"type": "item.completed",
+             "item": {"type": "command_execution", "command": "pwd"}},
+        ])
+        self.assertEqual(state["tool_calls"], 1)
+
     def test_turn_failed_recorded(self):
         state, _ = self._feed([
             {"type": "turn.failed", "error": {"message": "boom"}},

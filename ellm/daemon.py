@@ -112,25 +112,29 @@ class Daemon:
 
             store.log_event(self.conn, res.session_id, "prompt", {"text": text})
             store.log_event(self.conn, res.session_id, "response", {"text": res.text})
+            if res.tool_calls:
+                store.log_event(self.conn, res.session_id, "tool_calls",
+                                {"count": res.tool_calls})
             if not session_id:
                 store.set_state(self.conn, "session_id", res.session_id)
 
             cpt = manifest["chars_per_token"]
-            chat_tokens = store.session_chat_tokens(self.conn, res.session_id, cpt)
+            context_tokens = store.session_context_tokens(
+                self.conn, res.session_id, cpt, manifest["tool_call_tokens"])
 
             final_session = res.session_id
-            if chat_tokens >= manifest["trigger_tokens"]:
+            if context_tokens >= manifest["trigger_tokens"]:
                 send({"type": "leap", "phase": "start",
-                      "session_id": res.session_id, "chat_tokens": chat_tokens,
-                      "reason": "chat_context"})
+                      "session_id": res.session_id, "context_tokens": context_tokens,
+                      "reason": "estimated_context"})
                 try:
                     final_session = leap_mod.leap(
                         self.conn, manifest, self.inst_dir, log=self.log,
                         timeout=timeout)
-                    chat_tokens = store.session_chat_tokens(
-                        self.conn, final_session, cpt)
+                    context_tokens = store.session_context_tokens(
+                        self.conn, final_session, cpt, manifest["tool_call_tokens"])
                     send({"type": "leap", "phase": "done",
-                          "session_id": final_session, "chat_tokens": chat_tokens})
+                          "session_id": final_session, "context_tokens": context_tokens})
                 except Exception as e:
                     self.log(f"leap failed: {e}")
                     store.log_event(self.conn, res.session_id, "error",
@@ -138,7 +142,7 @@ class Daemon:
                     send({"type": "leap", "phase": "error", "message": str(e)})
 
             send({"type": "done", "ok": True, "session_id": final_session,
-                  "trigger": manifest["trigger_tokens"], "chat_tokens": chat_tokens})
+                  "trigger": manifest["trigger_tokens"], "context_tokens": context_tokens})
 
     def handle_status(self, send):
         manifest = store.load_manifest(self.cfg, self.name)
@@ -151,6 +155,9 @@ class Daemon:
                   "chat_tokens": store.session_chat_tokens(
                       self.conn, store.get_state(self.conn, "session_id"),
                       manifest["chars_per_token"]),
+                  "context_tokens": store.session_context_tokens(
+                      self.conn, store.get_state(self.conn, "session_id"),
+                      manifest["chars_per_token"], manifest["tool_call_tokens"]),
                   "leap_count": int(store.get_state(self.conn, "leap_count", "0")),
                   "pid": os.getpid()})
 
