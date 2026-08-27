@@ -1,0 +1,29 @@
+<ellm>
+  <!-- default backend: codex | kimi | mock -->
+  <backend>codex</backend>
+  <!-- empty = same as backend -->
+  <compressor-backend></compressor-backend>
+
+  <!-- leap thresholds (estimated tokens) -->
+  <trigger-tokens>180000</trigger-tokens>
+  <compressed-budget>30000</compressed-budget>
+  <cut-tokens>30000</cut-tokens>
+  <k>3</k>
+  <chars-per-token>4</chars-per-token>
+
+  <instances-dir>ellms/</instances-dir>
+  <!-- daemon shuts down after N seconds idle; 0 = never -->
+  <idle-timeout>0</idle-timeout>
+
+  <compressor-prompt><![CDATA[You are a memory compressor for an eternal LLM session.
+Compress the following conversation slice into a dense factual summary of at most {CHUNK_TOKENS} tokens (~{CHUNK_CHARS} characters).
+Preserve: decisions, facts, names, code, commitments, open questions, user preferences.
+Drop: pleasantries, dead ends, redundant reasoning, formatting noise.
+Output ONLY the compressed memory, no preamble.]]></compressor-prompt>
+
+  <default-turn-prompt><![CDATA[]]></default-turn-prompt>
+
+  <default-post-leap-prompt><![CDATA[You are continuing an eternal session that just leaped to a fresh context.
+Below is your compressed memory of the session so far, followed by the most recent context verbatim.
+Acknowledge briefly that your memory is intact and stand by.]]></default-post-leap-prompt>
+</ellm>
