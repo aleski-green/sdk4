@@ -113,9 +113,9 @@ def cmd_prompt(cfg, name, prompt):
         print()  # newline after stream
         chat = res.get("chat_tokens", 0)
         window = res.get("provider_window_tokens", res.get("session_tokens", 0))
-        trigger = res.get("provider_trigger_tokens", res.get("trigger", 0))
-        print(f"[{name} | session {res.get('session_id')} | chat ~{chat:,} tokens | "
-              f"provider window ~{window:,}/{trigger:,}]",
+        trigger = res.get("trigger", 0)
+        print(f"[{name} | session {res.get('session_id')} | chat ~{chat:,}/{trigger:,} tokens | "
+              f"provider window ~{window:,}]",
               file=sys.stderr)
 
 
@@ -131,9 +131,8 @@ def cmd_status(cfg, name):
         manifest = store.load_manifest(cfg, name)
         session_id = store.get_state(conn, "session_id")
         chat = store.session_chat_tokens(conn, session_id, manifest["chars_per_token"])
-        print(f"  chat_tokens:    ~{chat:,}")
-        print(f"  provider_window: ~{int(store.get_state(conn, 'session_tokens', '0')):,} / "
-              f"{manifest['trigger_tokens']:,}")
+        print(f"  chat_tokens:    ~{chat:,} / {manifest['trigger_tokens']:,}")
+        print(f"  provider_window: ~{int(store.get_state(conn, 'session_tokens', '0')):,}")
         print(f"  leaps:          {store.get_state(conn, 'leap_count', '0')}")
         conn.close()
         return
@@ -142,9 +141,8 @@ def cmd_status(cfg, name):
         print(f"{name}: running (pid {res['pid']})")
         print(f"  backend:        {res['backend']}")
         print(f"  session_id:     {res['session_id']}")
-        print(f"  chat_tokens:    ~{res['chat_tokens']:,}")
-        print(f"  provider_window: ~{res['provider_window_tokens']:,} / "
-              f"{res['provider_trigger_tokens']:,}")
+        print(f"  chat_tokens:    ~{res['chat_tokens']:,} / {res['trigger_tokens']:,}")
+        print(f"  provider_window: ~{res['provider_window_tokens']:,}")
         print(f"  leaps:          {res['leap_count']}")
 
 

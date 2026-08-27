@@ -26,7 +26,7 @@ class DaemonTurnTests(unittest.TestCase):
         with open(self.cfg_path, "w") as f:
             f.write("""<ellm>
   <backend>mock</backend>
-  <trigger-tokens>80</trigger-tokens>
+  <trigger-tokens>800</trigger-tokens>
   <compressed-budget>40</compressed-budget>
   <cut-tokens>8</cut-tokens>
   <k>2</k>
@@ -93,8 +93,8 @@ class DaemonTurnTests(unittest.TestCase):
         self.assertFalse(any(m["type"] == "leap" for m in msgs))
         self.assertFalse(any(m["type"] == "chunk" and "leaping" in m.get("text", "") for m in msgs))
 
-    def test_chat_trigger_is_distinct_from_provider_window_trigger(self):
-        self.daemon.cfg["chat_trigger_tokens"] = 1
+    def test_chat_length_alone_triggers_a_leap(self):
+        self.daemon.cfg["trigger_tokens"] = 1
         MockAdapter.next_usage_tokens = 1
         MockAdapter.next_usage_is_window = True
         msgs = self._rpc({"cmd": "prompt", "text": "hello"})
@@ -102,6 +102,15 @@ class DaemonTurnTests(unittest.TestCase):
         self.assertEqual(start["reason"], "chat_context")
         self.assertGreater(start["chat_tokens"], 1)
         self.assertEqual(start["provider_window_tokens"], 1)
+
+    def test_provider_window_does_not_trigger_a_leap(self):
+        MockAdapter.next_usage_tokens = 1_000
+        MockAdapter.next_usage_is_window = True
+        msgs = self._rpc({"cmd": "prompt", "text": "hello"})
+        done = next(m for m in msgs if m["type"] == "done")
+        self.assertEqual(done["provider_window_tokens"], 1_000)
+        self.assertLess(done["chat_tokens"], 800)
+        self.assertFalse(any(m["type"] == "leap" for m in msgs))
 
     def test_raw_provider_usage_is_persisted(self):
         MockAdapter.next_usage_tokens = 40
@@ -116,7 +125,8 @@ class DaemonTurnTests(unittest.TestCase):
         })
 
     def test_leap_is_a_protocol_event_not_a_chunk(self):
-        # Force a leap by reporting a window at/over the trigger.
+        # Force a leap by making the local chat estimate reach the trigger.
+        self.daemon.cfg["trigger_tokens"] = 1
         MockAdapter.next_usage_tokens = 80
         MockAdapter.next_usage_is_window = True
         msgs = self._rpc({"cmd": "prompt", "text": "please leap"})

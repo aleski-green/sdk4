@@ -126,15 +126,11 @@ class Daemon:
             chat_tokens = store.session_chat_tokens(self.conn, res.session_id, cpt)
 
             final_session, final_tokens = res.session_id, total
-            provider_limit = total >= manifest["trigger_tokens"]
-            chat_limit = (manifest["chat_trigger_tokens"] > 0 and
-                          chat_tokens >= manifest["chat_trigger_tokens"])
-            if provider_limit or chat_limit:
-                reason = "provider_window" if provider_limit else "chat_context"
+            if chat_tokens >= manifest["trigger_tokens"]:
                 send({"type": "leap", "phase": "start",
                       "session_id": res.session_id, "session_tokens": total,
                       "provider_window_tokens": total, "chat_tokens": chat_tokens,
-                      "reason": reason})
+                      "reason": "chat_context"})
                 try:
                     final_session = leap_mod.leap(
                         self.conn, manifest, self.inst_dir, log=self.log,
@@ -156,9 +152,7 @@ class Daemon:
                   # session_tokens and trigger remain for clients using the old RPC.
                   "session_tokens": final_tokens, "trigger": manifest["trigger_tokens"],
                   "provider_window_tokens": final_tokens,
-                  "provider_trigger_tokens": manifest["trigger_tokens"],
-                  "chat_tokens": chat_tokens,
-                  "chat_trigger_tokens": manifest["chat_trigger_tokens"]})
+                  "chat_tokens": chat_tokens})
 
     def handle_status(self, send):
         manifest = store.load_manifest(self.cfg, self.name)
@@ -170,11 +164,9 @@ class Daemon:
                   "session_tokens": int(store.get_state(self.conn, "session_tokens", "0")),
                   "trigger_tokens": manifest["trigger_tokens"],
                   "provider_window_tokens": int(store.get_state(self.conn, "session_tokens", "0")),
-                  "provider_trigger_tokens": manifest["trigger_tokens"],
                   "chat_tokens": store.session_chat_tokens(
                       self.conn, store.get_state(self.conn, "session_id"),
                       manifest["chars_per_token"]),
-                  "chat_trigger_tokens": manifest["chat_trigger_tokens"],
                   "leap_count": int(store.get_state(self.conn, "leap_count", "0")),
                   "pid": os.getpid()})
 
