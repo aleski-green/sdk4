@@ -141,17 +141,11 @@ def leap(conn, manifest: dict, inst_dir: str, log=print, timeout=None) -> str:
     res = session_adapter.send(inst_dir, None, seed, timeout=timeout)
     new_session = res.session_id
 
-    estimated = est_tokens(seed + res.text, cpt)
-    new_tokens = router.reconcile_session_tokens(
-        0, res.usage_tokens, res.usage_is_window, estimated)
     store.log_leap(conn, old_session, new_session, context_path)
     store.set_state(conn, "session_id", new_session)
-    store.set_state(conn, "session_tokens", new_tokens)
     store.set_state(conn, "leap_count", str(leap_no))
     store.log_event(conn, new_session, "prompt", {"text": seed, "seed": True})
     store.log_event(conn, new_session, "response", {"text": res.text})
-    if res.usage:
-        store.log_event(conn, new_session, "usage", res.usage)
     log("[leap] done: %s -> %s (context.md ~%s est tokens)" % (
         old_session, new_session, f"{est_tokens(context, cpt):,}"))
     return new_session

@@ -33,9 +33,7 @@ python3 ellm.py smith --stop     # stop daemon; session survives, next -p resume
 ```
 
 Output: the model's reply on **stdout**, one status line on **stderr** showing
-both ELLM's retained chat estimate and the backend's actual context window — so
-stdout stays pipeable. The provider window includes hidden system/tool context;
-the chat estimate counts only stored user and assistant text.
+ELLM's retained chat estimate — so stdout stays pipeable.
 
 ---
 
@@ -44,7 +42,7 @@ the chat estimate counts only stored user and assistant text.
 | Command | What it does |
 |---|---|
 | `ellm.py <NAME> -p '<PROMPT>'` | Send a prompt. Auto-creates instance + daemon on first use. Streams the reply. |
-| `ellm.py list` | All instances: running/stopped, session id, chat and provider-window tokens, leap count |
+| `ellm.py list` | All instances: running/stopped, session id, chat tokens, leap count |
 | `ellm.py <NAME> --status` | Detail for one instance (works whether daemon is up or not) |
 | `ellm.py <NAME> --stop` | Graceful daemon stop (finishes the in-flight turn). Session persists |
 
@@ -55,9 +53,8 @@ Notes:
 
 ## How a leap works (automatic)
 
-1. Provider window ≥ `trigger-tokens` (default 180 000) → leap fires *between* turns.
-   Optionally, `chat-trigger-tokens` can leap from ELLM's retained chat length;
-   `0` (the default) disables this additional trigger.
+1. ELLM's retained chat estimate ≥ `trigger-tokens` (default 180 000) → leap fires
+   *between* turns.
 2. Everything except the last `cut-tokens` (30k, kept verbatim = **CUT**) is split
    chronologically into **K** slices (K=3) on turn boundaries.
 3. K one-shot compressor calls each condense their slice to `compressed-budget / K`
@@ -82,7 +79,6 @@ overrides global):
   <name>smith</name>
   <backend>kimi</backend>                <!-- or codex; overrides global -->
   <!-- <trigger-tokens>150000</trigger-tokens> -->
-  <!-- <chat-trigger-tokens>120000</chat-trigger-tokens> -->
   <turn-prompt><![CDATA[You are Smith... (injected with EVERY turn)]]></turn-prompt>
   <post-leap-prompt><![CDATA[You just leaped... (injected after EACH leap)]]></post-leap-prompt>
 </ellm-instance>
@@ -91,7 +87,7 @@ overrides global):
 Resolution order: manifest → `config.xml` → built-in defaults. Edits apply live
 (re-read every turn). Useful overrides: `backend`, `compressor-backend` (cheaper model
 for compression), `trigger-tokens`, `compressed-budget`, `cut-tokens`, `k`,
-`chars-per-token`, `chat-trigger-tokens`, `turn-timeout`.
+`chars-per-token`, `turn-timeout`.
 
 ## Instance folder anatomy — `ellms/<NAME>/`
 
@@ -132,6 +128,6 @@ Run the test suite: `python3 -m unittest discover -s tests`
 | codex: `exited 1 ... not logged in` | Run `codex login` once |
 | Backend CLI not on PATH | `ELLM_CODEX_BIN=/path/to/codex` / `ELLM_KIMI_BIN=/path/to/kimi` |
 | Stale state after kill -9 | Just run `-p` again — session resumes; daemon cleans its own socket |
-| Provider window much larger than chat | Expected: Codex includes hidden system/tool context. Set `chat-trigger-tokens` to leap on ELLM's retained chat length as well. |
+| Leap too early/late | Tune `trigger-tokens`; the estimate is based on stored chat text and `chars-per-token`. |
 
 Design doc: [docs/ELLM-DESIGN.md](docs/ELLM-DESIGN.md)
