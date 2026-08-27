@@ -22,6 +22,19 @@ class ChatContextTests(unittest.TestCase):
             finally:
                 conn.close()
 
+    def test_context_includes_the_configured_budget_per_tool_call(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = store.connect(os.path.join(tmp, "ellm.db"))
+            try:
+                store.log_event(conn, "active", "prompt", {"text": "abcd"})
+                store.log_event(conn, "active", "response", {"text": "efgh"})
+                store.log_event(conn, "active", "tool_calls", {"count": 2})
+                self.assertEqual(store.session_tool_calls(conn, "active"), 2)
+                self.assertEqual(
+                    store.session_context_tokens(conn, "active", 4, 3_000), 6_002)
+            finally:
+                conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

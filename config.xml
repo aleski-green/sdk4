@@ -4,12 +4,13 @@
   <!-- empty = same as backend -->
   <compressor-backend></compressor-backend>
 
-  <!-- ELLM-visible chat threshold: stored prompts + replies -->
+  <!-- ELLM context estimate: stored prompts + replies + tool-call budgets -->
   <trigger-tokens>180000</trigger-tokens>
   <compressed-budget>30000</compressed-budget>
   <cut-tokens>30000</cut-tokens>
   <k>3</k>
   <chars-per-token>4</chars-per-token>
+  <tool-call-tokens>3000</tool-call-tokens>
 
   <instances-dir>ellms/</instances-dir>
   <!-- daemon shuts down after N seconds idle; 0 = never -->

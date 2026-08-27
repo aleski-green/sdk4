@@ -49,7 +49,7 @@ class StatusTests(unittest.TestCase):
                  mock.patch.object(ellm_cli, "rpc", return_value=old_status), \
                  contextlib.redirect_stdout(output):
                 ellm_cli.cmd_status(cfg, "demo")
-            self.assertIn("chat_tokens:    ~2 / 180,000", output.getvalue())
+            self.assertIn("context_tokens: ~2 / 180,000", output.getvalue())
 
 
 if __name__ == "__main__":

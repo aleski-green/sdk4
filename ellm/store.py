@@ -17,6 +17,9 @@ BUILTIN_DEFAULTS = {
     "cut_tokens": 30_000,
     "k": 3,
     "chars_per_token": 4,
+    # Estimated retained context cost of one completed tool call.  Adapters
+    # report tool calls generically; the estimator applies this budget.
+    "tool_call_tokens": 3_000,
     "idle_timeout": 0,
     "turn_timeout": 600,
     "compressor_prompt": "Compress this conversation slice to at most {CHUNK_TOKENS} tokens. Output only the summary.",
@@ -33,6 +36,7 @@ _GLOBAL_MAP = {
     "cut-tokens": "cut_tokens",
     "k": "k",
     "chars-per-token": "chars_per_token",
+    "tool-call-tokens": "tool_call_tokens",
     "idle-timeout": "idle_timeout",
     "turn-timeout": "turn_timeout",
     "compressor-prompt": "compressor_prompt",
@@ -40,7 +44,7 @@ _GLOBAL_MAP = {
     "default-post-leap-prompt": "post_leap_prompt",
 }
 
-_INT_KEYS = {"trigger_tokens", "compressed_budget", "cut_tokens", "k", "chars_per_token", "idle_timeout", "turn_timeout"}
+_INT_KEYS = {"trigger_tokens", "compressed_budget", "cut_tokens", "k", "chars_per_token", "tool_call_tokens", "idle_timeout", "turn_timeout"}
 
 
 def utcnow() -> str:
@@ -82,6 +86,7 @@ MANIFEST_TEMPLATE = """<ellm-instance>
   <!-- optional overrides (defaults come from global config.xml): -->
   <!-- <backend>kimi</backend> -->
   <!-- <trigger-tokens>150000</trigger-tokens> -->
+  <!-- <tool-call-tokens>3000</tool-call-tokens> -->
   <turn-prompt><![CDATA[{turn_prompt}]]></turn-prompt>
   <post-leap-prompt><![CDATA[{post_leap_prompt}]]></post-leap-prompt>
 </ellm-instance>
@@ -95,6 +100,7 @@ _MANIFEST_MAP = {
     "cut-tokens": "cut_tokens",
     "k": "k",
     "chars-per-token": "chars_per_token",
+    "tool-call-tokens": "tool_call_tokens",
     "turn-prompt": "turn_prompt",
     "post-leap-prompt": "post_leap_prompt",
     "compressor-prompt": "compressor_prompt",
@@ -234,3 +240,26 @@ def session_chat_tokens(conn, session_id: str, chars_per_token: int) -> int:
     # stored as one prompt event, so its full serialized text is included here.
     text = "".join(event["text"] for event in session_events(conn, session_id))
     return estimate_tokens(text, chars_per_token)
+
+
+def session_tool_calls(conn, session_id: str) -> int:
+    """Return completed tool calls recorded for one backend session."""
+    if not session_id:
+        return 0
+    rows = conn.execute(
+        "SELECT data FROM events WHERE session_id=? AND type='tool_calls'", (session_id,)
+    ).fetchall()
+    total = 0
+    for (data,) in rows:
+        try:
+            total += max(0, int(json.loads(data).get("count", 0)))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+    return total
+
+
+def session_context_tokens(conn, session_id: str, chars_per_token: int,
+                           tool_call_tokens: int) -> int:
+    """Estimate retained context: saved chat text plus tool-call overhead."""
+    return (session_chat_tokens(conn, session_id, chars_per_token)
+            + session_tool_calls(conn, session_id) * max(0, tool_call_tokens))
