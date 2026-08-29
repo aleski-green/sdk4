@@ -23,7 +23,6 @@ agent = Agentpy(
     context="You are a helpful coding agent.",
     manifest="Work only inside the current project.",
     contextUpdPrompt="Update context with durable facts from the last task.",
-    max_invocations=1_000,
 )
 
 agent.llmrun("Inspect this project and summarize its structure.")
@@ -36,7 +35,7 @@ print(agent.context)
 agent.llmrunupd("Record the project's main components.")
 ```
 
-`llmrun()` records the latest invocation and answer, retaining a sliding window of `max_invocations` records (default `1_000`). `llmupd()` runs `contextUpdPrompt` exactly as supplied, stores its answer in `context`, and clears the temporary `last_invocation` and `last_result` fields. All three agent methods mutate state and return nothing.
+`llmrun()` records the latest invocation and answer, retaining an internal sliding window of 1,000 records. `llmupd()` runs `contextUpdPrompt` exactly as supplied, stores its answer in `context`, and clears the temporary `last_invocation` and `last_result` fields. All three agent methods mutate state and return nothing.
 
 ## Persistence
 

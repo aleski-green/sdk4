@@ -8,6 +8,11 @@ from pathlib import Path
 class AgentState:
     """Persist every dataclass field in a per-agent JSON file."""
 
+    _max_invocations = 1_000
+
+    def _trim_invocations(self) -> None:
+        self.invocations = self.invocations[-self._max_invocations:]
+
     def _state_path(self) -> Path:
         return self.workdir / ".agentpy" / f"{self.agid}.json"
 
