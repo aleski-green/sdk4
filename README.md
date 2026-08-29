@@ -35,7 +35,7 @@ print(agent.context)
 agent.llmrunupd("Record the project's main components.")
 ```
 
-`llmrun()` records the latest invocation and answer. `llmupd()` folds that pending pair into `context` and clears the temporary `last_invocation` and `last_result` fields. All three agent methods mutate state and return nothing.
+`llmrun()` records the latest invocation and answer. `llmupd()` runs `contextUpdPrompt` exactly as supplied, stores its answer in `context`, and clears the temporary `last_invocation` and `last_result` fields. All three agent methods mutate state and return nothing.
 
 ## Persistence
 
