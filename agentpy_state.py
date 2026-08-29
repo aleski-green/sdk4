@@ -1,6 +1,6 @@
 """JSON persistence shared by dataclass-based agents."""
 
-from dataclasses import asdict, fields
+from dataclasses import MISSING, asdict, fields
 import json
 from pathlib import Path
 
@@ -33,6 +33,10 @@ class AgentState:
             raise ValueError("Saved state belongs to a different agent.")
 
         for state_field in fields(self):
+            if state_field.name not in state:
+                if state_field.default is not MISSING or state_field.default_factory is not MISSING:
+                    continue
+                raise KeyError(f"Saved state is missing required field: {state_field.name}")
             value = state[state_field.name]
             if state_field.name == "workdir":
                 value = Path(value)
