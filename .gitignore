@@ -17,8 +17,8 @@ env/
 .env.*
 !.env.example
 
-# ellm runtime data (instances, logs, sqlite)
-ellms/
+# Agentpy runtime state
+.agentpy/
 *.db
 *.sqlite
 *.sqlite3
